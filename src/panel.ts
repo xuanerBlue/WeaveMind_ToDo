@@ -11,6 +11,9 @@ let doc: TodoDoc | null = null;
 let editingText: number | null = null; // 正在内联编辑正文的行号
 let editingDue: number | null = null; // 正在编辑截止日期的行号
 let dialogOpen = false; // 原生文件对话框打开期间，禁止因失焦收回面板
+let watchedPath: string | null = null; // 当前已监听的文件路径
+let ignoreWatchUntil = 0; // 自己写入后短时间内忽略文件变化事件（避免回声）
+let watchReloadTimer: number | null = null;
 
 const listEl = document.getElementById("list")!;
 const countEl = document.getElementById("count")!;
@@ -51,21 +54,40 @@ async function reload(): Promise<void> {
     return;
   }
   try {
+    await ensureWatching();
     const content = await bridge.readTodoFile(config.todoFilePath);
     doc = new TodoDoc(content);
     render();
+    await emitCount();
   } catch (e) {
     renderMessage(`读取文件失败：${String(e)}`, true);
   }
 }
 
+// 监听当前文件（路径变化时重新监听，避免每次 reload 都重置）
+async function ensureWatching(): Promise<void> {
+  if (config.todoFilePath && config.todoFilePath !== watchedPath) {
+    try {
+      await bridge.watchFile(config.todoFilePath);
+      watchedPath = config.todoFilePath;
+    } catch {
+      /* 监听失败不影响主流程 */
+    }
+  }
+}
+
+// 通知悬浮球更新未完成数量角标
+async function emitCount(): Promise<void> {
+  if (!doc) return;
+  await bridge.emitTodosChanged(doc.todos.filter((t) => !t.checked).length);
+}
+
 async function persist(): Promise<void> {
   if (!doc || !config.todoFilePath) return;
   try {
+    ignoreWatchUntil = Date.now() + 800; // 忽略本次写入触发的文件变化事件
     await bridge.writeTodoFile(config.todoFilePath, doc.toString());
-    // 通知悬浮球刷新未完成数量角标
-    const pending = doc.todos.filter((t) => !t.checked).length;
-    await bridge.emitTodosChanged(pending);
+    await emitCount();
   } catch (e) {
     renderMessage(`写入文件失败：${String(e)}`, true);
   }
@@ -396,6 +418,17 @@ async function init(): Promise<void> {
       await bridge.showPanelAt(pos.x, pos.y);
       await reload();
     }
+  });
+
+  // 文件被外部（如 Obsidian）修改 → 防抖后刷新面板
+  await bridge.onTodoFileChanged(() => {
+    if (Date.now() < ignoreWatchUntil) return; // 自己写入引发的，忽略
+    if (editingText !== null || editingDue !== null || dialogOpen) return; // 编辑中不打断
+    if (watchReloadTimer !== null) clearTimeout(watchReloadTimer);
+    watchReloadTimer = window.setTimeout(() => {
+      watchReloadTimer = null;
+      void reload();
+    }, 200);
   });
 
   await reload();

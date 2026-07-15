@@ -34,6 +34,12 @@ async function refreshCount(): Promise<void> {
   }
 }
 
+// 请求切换面板（点击悬浮球或托盘菜单都走这里）
+async function requestToggle(): Promise<void> {
+  const geom = await bridge.getBallGeometry();
+  await bridge.emitTogglePanel(geom);
+}
+
 // 按下悬浮球：移动超过阈值 → 交给系统拖拽；否则松开算一次点击 → 切换面板
 ballEl.addEventListener("mousedown", (e) => {
   if (e.button !== 0) return;
@@ -56,12 +62,9 @@ ballEl.addEventListener("mousedown", (e) => {
     }
   };
 
-  const onUp = async () => {
+  const onUp = () => {
     cleanup();
-    if (!dragging) {
-      const geom = await bridge.getBallGeometry();
-      await bridge.emitTogglePanel(geom);
-    }
+    if (!dragging) void requestToggle();
   };
 
   const cleanup = () => {
@@ -95,6 +98,9 @@ async function init(): Promise<void> {
 
   // 面板写入待办后，刷新角标数字
   await bridge.onTodosChanged(updateBadge);
+
+  // 托盘菜单「显示/隐藏面板」
+  await bridge.onTrayShowPanel(() => void requestToggle());
 
   await refreshCount();
 }

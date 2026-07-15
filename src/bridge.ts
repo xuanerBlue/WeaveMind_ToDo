@@ -146,3 +146,16 @@ export async function ensureVisible(): Promise<void> {
 export async function setPanelAlwaysOnTop(on: boolean): Promise<void> {
   await self.setAlwaysOnTop(on);
 }
+
+// ---------------------------------------------------------------- 文件监听 & 托盘
+export async function watchFile(path: string): Promise<void> {
+  await invoke("watch_file", { path });
+}
+
+export async function onTodoFileChanged(cb: () => void): Promise<UnlistenFn> {
+  return listen("todo-file-changed", () => cb());
+}
+
+export async function onTrayShowPanel(cb: () => void): Promise<UnlistenFn> {
+  return listen("tray-show-panel", () => cb());
+}
