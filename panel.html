@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>待办</title>
+  </head>
+  <body>
+    <div class="card">
+      <header data-tauri-drag-region>
+        <span class="title" data-tauri-drag-region>待办</span>
+        <span class="count" id="count"></span>
+        <button class="icon-btn" id="refresh" title="刷新">⟳</button>
+        <button class="icon-btn" id="settings" title="选择 Todo.md 文件">⚙</button>
+      </header>
+      <div class="add-row">
+        <input
+          id="add-input"
+          type="text"
+          autocomplete="off"
+          placeholder="添加待办，回车确认（可含 🔺 / 📅 2026-07-20 / #标签）"
+        />
+      </div>
+      <div class="list" id="list"></div>
+      <div class="footer" id="footer"></div>
+    </div>
+    <script type="module" src="/src/panel.ts"></script>
+  </body>
+</html>

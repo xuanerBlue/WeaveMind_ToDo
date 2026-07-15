@@ -1,0 +1,22 @@
+# 依赖
+node_modules
+
+# 前端构建产物
+dist
+dist-ssr
+
+# Rust / Tauri 构建产物
+src-tauri/target
+
+# 杂项
+.DS_Store
+*.local
+.idea
+.vscode/*
+!.vscode/extensions.json
+
+# 图标源（由 scripts/make-icon.mjs 生成，src-tauri/icons 才是产物）
+/app-icon.png
+
+# 临时调试日志
+weavemind-debug.log
