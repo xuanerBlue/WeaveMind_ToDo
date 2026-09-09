@@ -63,6 +63,50 @@ async fn pick_todo_file(app: tauri::AppHandle) -> Option<String> {
     rx.await.ok().flatten().map(|fp| fp.to_string())
 }
 
+/// 默认待办文件的位置：应用数据目录。
+///
+/// 刻意**不放** .app 内部或 Program Files：前者会被覆盖安装连带删掉（更新即丢数据），
+/// 后者写入需要管理员权限。应用数据目录不会被更新触及，也不需要特殊权限。
+/// 这里只建目录不建文件，内容由前端首次写入。
+#[tauri::command]
+fn default_todo_path(app: tauri::AppHandle) -> Result<String, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("ToDo.md").to_string_lossy().to_string())
+}
+
+/// 新建待办文件：保存对话框，用户自己挑位置和文件名。
+/// 与 pick_todo_file 同样走「异步命令 + 非阻塞回调 + oneshot」，原因见 DEVELOPMENT.md 5.1。
+#[tauri::command]
+async fn create_todo_file(app: tauri::AppHandle) -> Option<String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("Markdown", &["md"])
+        .set_file_name("ToDo.md")
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    rx.await.ok().flatten().map(|fp| fp.to_string())
+}
+
+/// 在系统文件管理器里定位这个文件（让用户能自己打开、拷走、迁移）。
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    let spawned = std::process::Command::new("open").args(["-R", &path]).spawn();
+
+    #[cfg(target_os = "windows")]
+    let spawned = std::process::Command::new("explorer")
+        .arg(format!("/select,{}", path))
+        .spawn();
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let spawned = std::process::Command::new("xdg-open").arg(&path).spawn();
+
+    spawned.map(|_| ()).map_err(|e| e.to_string())
+}
+
 // 文件监听：监视目标文件所在目录（比直接监视文件更耐受编辑器的原子保存），
 // 命中目标文件变化时向前端发送 "todo-file-changed"。
 #[derive(Default)]
@@ -117,6 +161,9 @@ pub fn run() {
             load_config,
             save_config,
             pick_todo_file,
+            default_todo_path,
+            create_todo_file,
+            reveal_path,
             watch_file
         ])
         .setup(|app| {

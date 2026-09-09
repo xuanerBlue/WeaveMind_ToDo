@@ -47,11 +47,16 @@ window.__TAURI_INTERNALS__ = {
   transformCallback(cb) { const id = 'cb' + Math.random().toString(36).slice(2); window[id] = cb; return id; },
   async invoke(cmd, args = {}) {
     switch (cmd) {
-      case 'load_config': return JSON.stringify({ todoFilePath: '/demo/ToDo.md' });
+      // 加 ?setup=1 打开首屏引导（未选文件的状态）
+      case 'load_config': return JSON.stringify({
+        todoFilePath: new URLSearchParams(location.search).has('setup') ? null : '/demo/ToDo.md' });
       case 'save_config': return null;
       case 'read_file': return fileContent;
       case 'write_file': fileContent = args.contents; log('── 写回 md ──\n' + args.contents); return null;
       case 'watch_file': return null;
+      case 'default_todo_path': return '/mock/AppData/com.weavemind.todo/ToDo.md';
+      case 'create_todo_file': return '/mock/新建的/ToDo.md';
+      case 'reveal_path': log('[在文件管理器里定位] ' + args.path); return null;
       case 'plugin:event|listen': { (listeners[args.event] ||= []).push(args.handler); return 1; }
       case 'plugin:event|unlisten': return null;
       case 'plugin:event|emit': return null;
@@ -89,7 +94,9 @@ window.addEventListener('unhandledrejection', (e) => log('✗ Promise 未捕获:
     <div class="sheet">
       <div class="sheet-title">设置</div>
       <div class="field"><label>文件</label><div class="opts">
-        <span class="filepath" id="s-path"></span><button class="mini" id="s-pick" type="button">更换</button></div></div>
+        <span class="filepath" id="s-path"></span>
+        <button class="mini" id="s-reveal" type="button">打开位置</button>
+        <button class="mini" id="s-pick" type="button">更换</button></div></div>
       <div class="sheet-sep"></div>
       <div class="sheet-label">类别</div>
       <div class="cats" id="s-cats"></div>

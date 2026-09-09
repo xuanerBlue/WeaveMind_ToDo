@@ -62,6 +62,9 @@ const SORT_LABEL: Record<SortKey, string> = {
 
 const CAT_NAME_MAX = 4; // 类别名长度上限，受标签条宽度约束
 
+// 新建文件时写入的骨架，保证在 Obsidian 里打开也是一份正常的 md
+const FILE_SKELETON = `---\ncategories: [${DEFAULT_CATEGORY}]\n---\n`;
+
 // ------------------------------------------------------------------
 // 状态
 // ------------------------------------------------------------------
@@ -108,6 +111,7 @@ const fSave = document.getElementById("f-save")!;
 const settingsModal = document.getElementById("settings-modal")!;
 const sPath = document.getElementById("s-path")!;
 const sPick = document.getElementById("s-pick")!;
+const sReveal = document.getElementById("s-reveal")!;
 const sCats = document.getElementById("s-cats")!;
 const sHint = document.getElementById("s-hint")!;
 const sClose = document.getElementById("s-close")!;
@@ -387,7 +391,7 @@ function renderFooter(): void {
   const path = el("span", "path");
   path.textContent = config.todoFilePath ? `📄 ${fileName(config.todoFilePath)}` : "未选择文件";
   path.title = config.todoFilePath || "点击选择 Todo.md 文件";
-  path.addEventListener("click", pickFile);
+  path.addEventListener("click", () => void chooseFile("open"));
   footerEl.appendChild(path);
 }
 
@@ -397,13 +401,63 @@ function renderSetup(): void {
   countEl.textContent = "";
   titleEl.textContent = "待办";
   sortBtn.hidden = true;
+
   const box = el("div", "setup");
-  box.appendChild(el("div", undefined, "选择你 Obsidian vault 里的 Todo.md 文件，即可开始"));
-  const btn = el("button", "btn", "选择 Todo.md 文件");
-  btn.addEventListener("click", pickFile);
-  box.appendChild(btn);
+  box.appendChild(el("div", "setup-title", "待办记在哪个 md 文件里？"));
+
+  const primary = el("button", "btn", "用默认位置");
+  primary.addEventListener("click", () => void useDefaultFile());
+  box.appendChild(primary);
+  box.appendChild(
+    el(
+      "div",
+      "setup-hint",
+      "放在软件的数据目录里。更新软件不会碰它，也不容易误删；路径随时能在设置里看到，以后想搬走就拷一个文件。",
+    ),
+  );
+
+  box.appendChild(el("div", "setup-sep"));
+
+  const row = el("div", "setup-row");
+  const pick = el("button", "btn ghost", "选择已有的");
+  pick.addEventListener("click", () => void chooseFile("open"));
+  const create = el("button", "btn ghost", "新建到别处");
+  create.addEventListener("click", () => void chooseFile("create"));
+  row.appendChild(pick);
+  row.appendChild(create);
+  box.appendChild(row);
+  box.appendChild(
+    el("div", "setup-hint", "想接进自己的 Obsidian vault 就走这两个，文件叫什么名字随你。"),
+  );
+
   listEl.appendChild(box);
   renderFooter();
+}
+
+/** 记下选定的文件并重新加载。 */
+async function setTodoPath(path: string): Promise<void> {
+  const latest = await bridge.loadConfig();
+  latest.todoFilePath = path;
+  await bridge.saveConfig(latest);
+  config = latest;
+  await reload();
+  if (settingsOpen) renderSettings();
+}
+
+/** 文件不存在或为空时，写入骨架，避免用户打开是一片空白。 */
+async function ensureSkeleton(path: string): Promise<void> {
+  const existing = await bridge.readTodoFile(path);
+  if (!existing.trim()) await bridge.writeTodoFile(path, FILE_SKELETON);
+}
+
+async function useDefaultFile(): Promise<void> {
+  try {
+    const path = await bridge.getDefaultTodoPath();
+    await ensureSkeleton(path);
+    await setTodoPath(path);
+  } catch (e) {
+    renderMessage(`创建默认文件失败：${String(e)}`, true);
+  }
 }
 
 // ------------------------------------------------------------------
@@ -749,14 +803,18 @@ async function afterSettingsChange(): Promise<void> {
 // ------------------------------------------------------------------
 // 交互
 // ------------------------------------------------------------------
-async function pickFile(): Promise<void> {
+/**
+ * 选文件。mode="open" 选已有的，mode="create" 走保存对话框新建。
+ * macOS 上 alwaysOnTop 会把原生对话框挡在后面，所以打开前先取消置顶、结束后恢复。
+ */
+async function chooseFile(mode: "open" | "create"): Promise<void> {
   if (dialogOpen) return;
   dialogOpen = true;
   try {
-    // macOS 上 alwaysOnTop 会把原生文件对话框挡在后面，打开前先取消置顶
     await bridge.setPanelAlwaysOnTop(false);
-    const picked = await bridge.pickTodoFile();
+    const picked = mode === "create" ? await bridge.createTodoFile() : await bridge.pickTodoFile();
     if (picked) {
+      if (mode === "create") await ensureSkeleton(picked);
       const latest = await bridge.loadConfig();
       latest.todoFilePath = picked;
       await bridge.saveConfig(latest);
@@ -779,7 +837,10 @@ sortBtn.addEventListener("click", (e) => {
 });
 addBtn.addEventListener("click", () => openForm(null));
 settingsBtn.addEventListener("click", openSettings);
-sPick.addEventListener("click", () => void pickFile());
+sPick.addEventListener("click", () => void chooseFile("open"));
+sReveal.addEventListener("click", () => {
+  if (config.todoFilePath) void bridge.revealPath(config.todoFilePath);
+});
 sClose.addEventListener("click", closeSettings);
 settingsModal.addEventListener("click", (e) => {
   if (e.target === settingsModal) closeSettings();

@@ -1,7 +1,7 @@
 // 桥接层：把所有 Tauri v2 API 收敛到这里，UI 只依赖这些稳定的函数。
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { currentMonitor } from "@tauri-apps/api/window";
+import { availableMonitors, currentMonitor, primaryMonitor } from "@tauri-apps/api/window";
 import { PhysicalPosition } from "@tauri-apps/api/dpi";
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppConfig } from "./types";
@@ -49,6 +49,41 @@ export async function pickTodoFile(): Promise<string | null> {
   // 走 Rust 端的 blocking 模态对话框，比 JS 版 open() 在置顶/无边框窗口下更可靠
   const res = await invoke<string | null>("pick_todo_file");
   return res ?? null;
+}
+
+// 默认待办文件位置（应用数据目录，更新软件不会碰它）
+export async function getDefaultTodoPath(): Promise<string> {
+  return invoke<string>("default_todo_path");
+}
+
+// 新建待办文件：保存对话框，用户自己挑位置与文件名
+export async function createTodoFile(): Promise<string | null> {
+  const res = await invoke<string | null>("create_todo_file");
+  return res ?? null;
+}
+
+// 在系统文件管理器里定位这个文件
+export async function revealPath(path: string): Promise<void> {
+  await invoke("reveal_path", { path });
+}
+
+export interface MonitorRect {
+  x: number; // 物理像素
+  y: number;
+  w: number;
+  h: number;
+}
+
+// 所有可用显示器的范围。用来判断记住的球位置现在还看不看得见
+// （外接屏拔了、或 Windows 上改了缩放比，旧坐标可能落在屏幕外）
+export async function getMonitorRects(): Promise<MonitorRect[]> {
+  const list = await availableMonitors();
+  return list.map((m) => ({ x: m.position.x, y: m.position.y, w: m.size.width, h: m.size.height }));
+}
+
+export async function getPrimaryMonitorRect(): Promise<MonitorRect | null> {
+  const m = await primaryMonitor();
+  return m ? { x: m.position.x, y: m.position.y, w: m.size.width, h: m.size.height } : null;
 }
 
 // ---------------------------------------------------------------- 悬浮球侧
