@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="UTF-8"><title>panel 逻辑预览</title>
+<style>body{background:#cfd6e4;margin:0;display:flex;align-items:flex-start;}
+ #stage{position:relative;width:448px;height:556px;margin:20px;flex:none;}
+ #stage>.shell,#stage>.modal,#stage>.popover{position:absolute;}
+ #log{flex:1;min-width:300px;height:calc(100vh - 40px);margin:20px 20px 20px 0;overflow:auto;
+      font:11px/1.5 ui-monospace,monospace;background:#11151c;color:#9fe6a0;padding:10px;
+      border-radius:8px;white-space:pre-wrap;}
+</style></head>
+<body>
+<script>
+// ---- 最小 Tauri mock：让 panel.ts 能在浏览器里原样跑起来 ----
+const FILE = `---
+weave-id: demo
+categories: [默认, 九安固件, 学习]
+---
+
+- [ ] 顶部随手记的一条
+- [x] 早就干完的 ➕ 2026-08-01 ✅ 2026-09-03
+
+## 九安固件
+
+- [ ] 盒的关调试串口，后续出厂后的开启方式改为BLE指令方式 🔺 ➕ 2026-09-02
+- [ ] 单只耳机声学测试失败后，美格信给双耳都写了测试失败 ⏫ ➕ 2026-08-20 📅 2026-08-30
+- [ ] 对盒固件的断言做处理 ⏫ ➕ 2026-09-01
+- [ ] 彻底没电的耳机+彻底没电的盒 插入USB后能否恢复 ⏫ ➕ 2026-09-03
+- [ ] osTimerIsRunning 有风险 - 不要调用 ⏫ ➕ 2026-09-04
+- [ ] 盒记录RF测试结果 ➕ 2026-09-05 📅 2026-09-01
+- [-] 这条不做了 ➕ 2026-08-10 ❌ 2026-09-06
+
+## 学习
+
+- [ ] 把声学基础过一遍，能用于方案评审 🔼 ➕ 2026-07-01
+- [ ] BLE 协议栈事件模型 🔼 ➕ 2026-08-05
+- [ ] 随便看看某个库 🔽 ➕ 2026-09-01
+
+## 备注
+
+这段普通文字不该被动。
+`;
+let fileContent = FILE;
+const listeners = {};
+const log = (...a) => { const el = document.getElementById('log'); if (el) el.textContent += a.join(' ') + '\n'; };
+
+window.__TAURI_INTERNALS__ = {
+  metadata: { currentWindow: { label: 'panel' }, currentWebview: { windowLabel: 'panel', label: 'panel' } },
+  transformCallback(cb) { const id = 'cb' + Math.random().toString(36).slice(2); window[id] = cb; return id; },
+  async invoke(cmd, args = {}) {
+    switch (cmd) {
+      case 'load_config': return JSON.stringify({ todoFilePath: '/demo/ToDo.md' });
+      case 'save_config': return null;
+      case 'read_file': return fileContent;
+      case 'write_file': fileContent = args.contents; log('── 写回 md ──\n' + args.contents); return null;
+      case 'watch_file': return null;
+      case 'plugin:event|listen': { (listeners[args.event] ||= []).push(args.handler); return 1; }
+      case 'plugin:event|unlisten': return null;
+      case 'plugin:event|emit': return null;
+      case 'plugin:window|is_visible': return true;
+      case 'plugin:window|outer_size': return { width: 448, height: 556 };
+      case 'plugin:window|outer_position': return { x: 900, y: 200 };
+      case 'plugin:window|scale_factor': return 1;
+      case 'plugin:window|current_monitor':
+        return { name: 'mock', size: { width: 1920, height: 1080 }, position: { x: 0, y: 0 }, scaleFactor: 1 };
+      case 'plugin:window|hide': log('[hide panel]'); return null;
+      case 'plugin:window|show': case 'plugin:window|set_focus':
+      case 'plugin:window|set_position': case 'plugin:window|set_always_on_top': return null;
+      default: log('[未 mock 的调用] ' + cmd); return null;
+    }
+  },
+};
+window.addEventListener('error', (e) => log('✗ 运行时错误: ' + e.message));
+window.addEventListener('unhandledrejection', (e) => log('✗ Promise 未捕获: ' + (e.reason?.message || e.reason)));
+</script>
+
+<div id="stage">
+  <div class="shell" id="shell" data-side="left">
+    <nav class="rail" id="rail"></nav>
+    <div class="card">
+      <header><span class="title" id="view-title">精选</span><span class="count" id="count"></span>
+        <button class="icon-btn" id="sort" title="排序">⇅</button>
+        <button class="icon-btn" id="add" title="新建待办">＋</button>
+        <button class="icon-btn" id="settings" title="设置">⚙</button></header>
+      <div class="list" id="list"></div>
+      <div class="footer" id="footer"></div>
+    </div>
+  </div>
+  <div class="popover" id="sort-menu" hidden></div>
+  <div class="modal" id="settings-modal" hidden>
+    <div class="sheet">
+      <div class="sheet-title">设置</div>
+      <div class="field"><label>文件</label><div class="opts">
+        <span class="filepath" id="s-path"></span><button class="mini" id="s-pick" type="button">更换</button></div></div>
+      <div class="sheet-sep"></div>
+      <div class="sheet-label">类别</div>
+      <div class="cats" id="s-cats"></div>
+      <div class="actions"><span class="hint" id="s-hint"></span>
+        <button class="btn" id="s-close" type="button">关闭</button></div>
+    </div>
+  </div>
+  <div class="modal" id="modal" hidden>
+    <div class="sheet">
+      <input id="f-title" type="text" autocomplete="off" placeholder="要做什么" />
+      <div class="field"><label>优先级</label><div class="opts" id="f-prio"></div></div>
+      <div class="field"><label>截止</label><div class="opts">
+        <input id="f-due" type="date" /><button class="mini" id="f-due-clear" type="button">清除</button></div></div>
+      <div class="field"><label>类别</label><div class="opts" id="f-cat"></div></div>
+      <div class="actions"><span class="hint" id="f-hint"></span>
+        <button class="btn ghost" id="f-cancel" type="button">取消</button>
+        <button class="btn" id="f-save" type="button">保存</button></div>
+    </div>
+  </div>
+</div>
+<div id="log"></div>
+<script type="module" src="/src/panel.ts"></script>
+</body></html>
