@@ -28,7 +28,7 @@ async function refreshCount(): Promise<void> {
   try {
     const content = await bridge.readTodoFile(config.todoFilePath);
     const doc = new TodoDoc(content);
-    updateBadge(doc.todos.filter((t) => !t.checked).length);
+    updateBadge(doc.todos.filter((t) => t.status === "open").length);
   } catch {
     updateBadge(0);
   }

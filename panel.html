@@ -6,24 +6,82 @@
     <title>待办</title>
   </head>
   <body>
-    <div class="card">
-      <header data-tauri-drag-region>
-        <span class="title" data-tauri-drag-region>待办</span>
-        <span class="count" id="count"></span>
-        <button class="icon-btn" id="refresh" title="刷新">⟳</button>
-        <button class="icon-btn" id="settings" title="选择 Todo.md 文件">⚙</button>
-      </header>
-      <div class="add-row">
-        <input
-          id="add-input"
-          type="text"
-          autocomplete="off"
-          placeholder="添加待办，回车确认（可含 🔺 / 📅 2026-07-20 / #标签）"
-        />
+    <!-- data-side 表示标签条所在的一侧：始终背离悬浮球 -->
+    <div class="shell" id="shell" data-side="left">
+      <nav class="rail" id="rail"></nav>
+
+      <div class="card">
+        <header data-tauri-drag-region>
+          <span class="title" id="view-title" data-tauri-drag-region>精选</span>
+          <span class="count" id="count"></span>
+          <button class="icon-btn" id="sort" title="排序">⇅</button>
+          <button class="icon-btn" id="add" title="新建待办">＋</button>
+          <button class="icon-btn" id="settings" title="选择 Todo.md 文件">⚙</button>
+        </header>
+        <div class="list" id="list"></div>
+        <div class="footer" id="footer"></div>
       </div>
-      <div class="list" id="list"></div>
-      <div class="footer" id="footer"></div>
     </div>
+
+    <!-- 排序菜单 -->
+    <div class="popover" id="sort-menu" hidden></div>
+
+    <!-- 设置：文件与类别管理 -->
+    <div class="modal" id="settings-modal" hidden>
+      <div class="sheet">
+        <div class="sheet-title">设置</div>
+
+        <div class="field">
+          <label>文件</label>
+          <div class="opts">
+            <span class="filepath" id="s-path"></span>
+            <button class="mini" id="s-pick" type="button">更换</button>
+          </div>
+        </div>
+
+        <div class="sheet-sep"></div>
+
+        <div class="sheet-label">类别</div>
+        <div class="cats" id="s-cats"></div>
+
+        <div class="actions">
+          <span class="hint" id="s-hint"></span>
+          <button class="btn" id="s-close" type="button">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 新建 / 编辑表单 -->
+    <div class="modal" id="modal" hidden>
+      <div class="sheet">
+        <input id="f-title" type="text" autocomplete="off" placeholder="要做什么" />
+
+        <div class="field">
+          <label>优先级</label>
+          <div class="opts" id="f-prio"></div>
+        </div>
+
+        <div class="field">
+          <label>截止</label>
+          <div class="opts">
+            <input id="f-due" type="date" />
+            <button class="mini" id="f-due-clear" type="button">清除</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>类别</label>
+          <div class="opts" id="f-cat"></div>
+        </div>
+
+        <div class="actions">
+          <span class="hint" id="f-hint"></span>
+          <button class="btn ghost" id="f-cancel" type="button">取消</button>
+          <button class="btn" id="f-save" type="button">保存</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="/src/panel.ts"></script>
   </body>
 </html>
