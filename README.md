@@ -55,17 +55,66 @@ npm run tauri:build
 
 产物在 `src-tauri/target/release/bundle/`：
 
-- macOS → `.app` / `.dmg`
-- Windows → `.msi` / `.exe`（NSIS）
+- macOS → `macos/WeaveMind.app`、`dmg/WeaveMind_<版本>_aarch64.dmg`
+- Windows → `msi/*.msi`、`nsis/*-setup.exe`
 
-> ⚠️ Tauri 应用**只能在目标系统上打包**（Mac 上打 Mac 包，Windows 上打 Windows 包）。要同时出两个平台的包，用两台机器或 CI（如 GitHub Actions 的 `tauri-apps/tauri-action`）。
+> ⚠️ **Tauri 不能交叉编译**：Mac 上只能打 macOS 包，Windows 上只能打 Windows 包。
+> 要同时出两个平台的包，需要两台机器、一个 Windows 虚拟机，或者 CI（GitHub Actions 的
+> `tauri-apps/tauri-action`）。
+
+macOS 上打 `.dmg` 那一步要用 AppleScript 指挥 Finder 摆窗口布局，**需要「自动化」权限**。
+在图形界面的终端里手动跑，系统会弹窗询问，同意即可；从没有该授权的环境（比如某些后台进程）
+跑会失败，并留下一个挂载着的临时映像——`hdiutil info` 能看到，用 `hdiutil detach /dev/diskN` 卸掉。
+`.app` 本身不受影响，只装不分发的话不需要 dmg。
+
+### 在 Windows 上构建
+
+第一次要准备环境（约 8GB）：
+
+1. [Rust 工具链](https://www.rust-lang.org/tools/install)（`rustup-init.exe`，默认 MSVC toolchain）
+2. [Visual Studio C++ 生成工具](https://visualstudio.microsoft.com/visual-cpp-build-tools/)——
+   勾选「使用 C++ 的桌面开发」工作负载
+3. [Node.js](https://nodejs.org/) ≥ 18
+4. WebView2 运行时：Win11 内置，Win10 多数机器已有，缺了就装
+   [Evergreen 引导程序](https://developer.microsoft.com/microsoft-edge/webview2/)
+
+之后和 macOS 一样：
+
+```bash
+npm install
+npm run tauri:build
+```
+
+装的时候直接跑 `nsis/*-setup.exe`（或 `msi`）。和 macOS 一样，**覆盖安装不会动配置和待办文件**——
+它们在 `%APPDATA%\com.weavemind.todo\` 下，跟 `identifier` 绑定，不在程序目录里。
 
 ## 第一次使用
 
-1. 启动后点击悬浮球 → 面板弹出。
-2. 点面板里的“选择 Todo.md 文件”，选中你 Obsidian vault 里的一个 md 文件（没有就先在 Obsidian 里新建一个，如 `Todo.md`）。
-3. 之后就能在面板里增删改待办，改动实时写回该文件，Obsidian 打开同一文件即可看到。
-4. 点面板右上角 ⚙ 进设置，可以建自己的类别（名字 ≤ 4 个字，受标签条宽度限制）。
+启动后点击悬浮球，面板会问「待办记在哪个 md 文件里？」，两条路：
+
+**一、用默认位置**（点一下就能开始用）
+
+待办文件放在软件的数据目录里：
+
+- macOS：`~/Library/Application Support/com.weavemind.todo/ToDo.md`
+- Windows：`%APPDATA%\com.weavemind.todo\ToDo.md`
+
+选这条的理由：**更新软件不会碰它**（覆盖安装只替换程序本身）、不需要特殊权限、也不容易误删。
+路径随时能在 ⚙ 设置里看到，旁边有「打开位置」直接在 Finder / 资源管理器里定位它。
+以后想搬进自己的 vault，把文件拷过去、再在设置里「更换」指向新位置就行。
+
+> 刻意**没有**放进 `.app` 内部或 `Program Files`：前者会被覆盖安装连带删掉（更新即丢数据），
+> 后者写入要管理员权限。
+
+**二、自己指定文件**（接进 Obsidian vault）
+
+- 「选择已有的」——挑一个现成的 md，比如 vault 里的 `ToDo.md`
+- 「新建到别处」——保存对话框里自己挑目录和文件名，名字随你起
+
+选这条就表示这个文件由你自己维护，可以随意接进知识库、纳入 git、被别的工具读写。
+
+**之后**：面板里增删改都实时写回该文件，Obsidian 打开同一文件即可看到。
+点 ⚙ 进设置可以管理类别（名字 ≤ 4 个字，受标签条宽度限制）。
 
 选定的文件路径记在系统配置目录：
 

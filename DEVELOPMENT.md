@@ -148,7 +148,62 @@ npm run tauri:dev      # 改前端 → Vite HMR 自动刷新；改 src-tauri →
 - 只校验前端构建：`npm run build`
 - 只校验 Rust：`cargo build --manifest-path src-tauri/Cargo.toml`（`tauri-build` 会顺带校验 `tauri.conf.json` 和 capabilities 权限标识符是否合法）
 
-## 7. 扩展指引
+## 7. 跨平台（Windows）
+
+### 7.1 不能交叉编译
+
+Tauri 只能在目标系统上打包。Windows 包必须在 Windows 机器上 `npm run tauri:build`。
+环境准备见 [README](./README.md#在-windows-上构建)。
+
+### 7.2 已经跨平台安全的部分
+
+- `main.rs` 有 `windows_subsystem = "windows"`，发布版不弹黑控制台。
+- `MacosLauncher::LaunchAgent` 名字带 Macos，但它是 autostart 插件的跨平台入参，
+  Windows 侧走注册表，同一份代码可用。
+- 路径分隔符一律 `[\\/]`、`detectEol()` 处理 CRLF、CSS 字体栈含 Microsoft YaHei、
+  `-webkit-` 前缀在 WebView2（Chromium）上有效。
+- `reveal_path` 用 `cfg(target_os)` 分派：macOS `open -R`、Windows `explorer /select,`、
+  其它 `xdg-open`。
+
+### 7.3 坐标与 DPI：唯一可信的基准是 Tauri 自己报的数
+
+**这是本项目第二个大坑**，实测数据（MacBook 内置屏，默认缩放）：
+
+| 来源 | 数值 |
+| --- | --- |
+| `system_profiler` 报告的面板分辨率 | 2560 × 1664 |
+| **Tauri `availableMonitors()`** | **2940 × 1912** |
+| `tauri.conf.json` 里球窗口的 width/height | 84 × 84 |
+| **Tauri `outerSize()`** | **168 × 168** |
+
+两处都不一致，原因各不相同：
+
+- macOS HiDPI 缩放下，Tauri 的"物理像素"基准是**逻辑分辨率 × scaleFactor**
+  （1470×956 × 2 = 2940×1912），**不是面板的真实像素**。
+- 窗口尺寸配置写的是逻辑像素，`outerSize()` 返回物理像素。
+
+结论：**判断"某个坐标现在还看不看得见"，必须同时用 `outerSize()` 和 `availableMonitors()`**，
+两者才是同一基准。用系统报告的分辨率去推算会得出错误结论（我第一版就是这么错的），
+把窗口尺寸当成配置里的值也一样错。
+
+`ballPosition` 存的是**物理像素**。外接屏拔掉、或改了显示缩放比之后，旧坐标可能落到所有屏幕
+之外——球就再也点不到，只能手动删配置文件。`ball.ts::restorePosition()` 因此在恢复前
+先判断球心是否落在某块显示器内，不在就退回主屏右下角并存回新位置。
+兜底位置的边距按 `scale` 折算，否则 2 倍屏上边距会缩成一半。
+
+**Windows 上这条更要紧**：那边缩放比常见 100/125/150/175%，改缩放比 macOS 上频繁得多。
+
+### 7.4 还没在 Windows 上验证的
+
+- **透明 + 无边框窗口的视觉**：Windows 没有 macOS 那种原生窗口阴影，圆球边缘抗锯齿也不同。
+- **托盘左键行为**：Windows 惯例是左键＝主操作、右键＝菜单；当前两个平台都是左键出菜单
+  （Tauri 默认 `show_menu_on_left_click = true`）。要改就用
+  `show_menu_on_left_click(false)` + `on_tray_icon_event` 接左键，
+  但**必须用 `cfg(target_os = "windows")` 包起来**，别动 macOS 上已有的行为。
+- **WebView2 运行时**：Win11 内置，Win10 多数已有。
+- 表单里原生 `date` 控件的外观在 WebView2 上和 WKWebView 不同。
+
+## 8. 扩展指引
 
 - **新增待办字段**（如开始日期 `🛫`）：改 `types.ts` → `todo-parser.ts` 的 `extractMeta`/`serialize` → `panel.ts` 渲染。
 - **新增一类视图**：在 `panel.ts` 的 `ViewId` 加一个 id → `currentTodos()` 里加取数分支
