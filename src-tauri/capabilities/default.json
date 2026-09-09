@@ -2,7 +2,10 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "悬浮球 + 面板窗口：运行时窗口控制、事件、原生文件选择",
-  "windows": ["ball", "panel"],
+  "windows": [
+    "ball",
+    "panel"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-show",
@@ -18,6 +21,8 @@
     "core:window:allow-is-visible",
     "core:window:allow-scale-factor",
     "core:window:allow-current-monitor",
+    "core:window:allow-primary-monitor",
+    "core:window:allow-available-monitors",
     "core:event:allow-listen",
     "core:event:allow-unlisten",
     "core:event:allow-emit",
