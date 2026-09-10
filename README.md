@@ -33,7 +33,7 @@
 
 ## 环境要求
 
-- [Node.js](https://nodejs.org/) ≥ 18（已在 25 上验证）
+- [Node.js](https://nodejs.org/) ≥ 18（开发者在 Node 25 上验证过）
 - [Rust](https://www.rust-lang.org/tools/install) 工具链（`cargo` / `rustc`）
 - macOS：Xcode Command Line Tools（`xcode-select --install`）
 - Windows：[Microsoft C++ 生成工具](https://visualstudio.microsoft.com/visual-cpp-build-tools/) + [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/)（Win10/11 通常已内置）
@@ -178,8 +178,9 @@ categories: [默认, 工作, 生活]
 ├── scripts/
 │   ├── test-parser.ts        # 解析器验收用例（npm test）
 │   └── make-icon.mjs         # 生成图标源（无依赖）
-├── 需求.md                    # 需求定稿：决策及其理由
-└── 修改计划.md                # 改造计划与进度
+└── docs/
+    ├── 需求.md               # 需求定稿：决策及其理由
+    └── 修改计划.md            # 改造计划与进度
 ```
 
 跑测试：
@@ -190,7 +191,7 @@ npm test
 
 ## 已知限制 / 注意
 
-- macOS 透明窗口用到了私有 API（`macOSPrivateApi`），因此**不能上架 Mac App Store**（个人使用无影响）。
+- macOS 透明窗口用到了私有 API（`macOSPrivateApi`），因此**不能上架 Mac App Store**。自己构建、自己安装使用不受影响。
 - 极少数情况下，macOS 打包版的透明窗口可能失效（[tauri#13415](https://github.com/tauri-apps/tauri/issues/13415)）——请以打包后的实际运行为准测试。
 - 只读写**单个** `Todo.md`；全库扫描、循环任务 `🔁`、开始/计划日期等尚未实现（见下方 Roadmap）。
 - 一条待办只能属于一个类别，没有层级类别，也没有多标签——这是为了让"分区标题即类别"这种人可读的 md 结构成立。
@@ -206,3 +207,14 @@ npm test
 - [ ] 全库 / 指定文件夹扫描汇总
 - [ ] 循环任务 `🔁`、开始/计划日期 `🛫⏳`
 - [ ] 配套的 Obsidian 窗口内插件入口
+
+## 设计文档
+
+代码之外，两份文档记录了"为什么是现在这个样子"：
+
+- [需求定稿](docs/需求.md) —— 每条设计的决策与理由，含一节「明确不做」，说明哪些方案被否掉以及原因
+- [改造计划](docs/修改计划.md) —— 从初版到当前看板形态的差距分析与分阶段方案
+
+## License
+
+[MIT](LICENSE) © JasonDong
