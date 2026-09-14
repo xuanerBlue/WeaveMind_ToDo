@@ -6,10 +6,24 @@ export type Priority = "highest" | "high" | "medium" | "none" | "low" | "lowest"
 // 三态：未做 / 已完成 / 已放弃（"我不做了"）。放弃留痕，不删除。
 export type TodoStatus = "open" | "done" | "cancelled";
 
+// 检查项（子任务）。它不是独立待办：不进任何视图、不参与精选与归档、不计入球上的数字，
+// 只跟着父任务走。text 是整段原文，不抽取优先级与日期——检查项没有这些字段。
+export interface ChecklistItem {
+  text: string;
+  done: boolean;
+  mark: string; // md 里的原始标记。用户手写的 [-] 在没被动过时原样写回
+}
+
 // 一条待办。description 保留正文原文（含用户手写的 #标签），
 // 结构化元数据被单独抽出，序列化时再按固定顺序拼回行尾。
+//
+// 一条待办在文件里占的不止一行：任务行之下缩进的那一段（描述 + 检查项）同属这条待办，
+// 合称它的「块」，范围是 [lineIndex, blockEnd]。凡是移动行的地方都必须整块移动。
 export interface Todo {
-  lineIndex: number; // 在文件行数组中的下标
+  lineIndex: number; // 任务行在文件行数组中的下标
+  blockEnd: number; // 块的最后一行；没有描述也没有检查项时等于 lineIndex
+  detail: string; // 详细描述，多行。空串表示没写
+  checklist: ChecklistItem[];
   indent: string; // 前导缩进（保留子任务层级）
   bullet: string; // 列表符号 "-" / "*" / "+"
   status: TodoStatus;

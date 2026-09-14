@@ -1,7 +1,7 @@
 {
   "name": "weavemind-todo",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "悬浮球待办 —— 桌面级悬浮球，读写 Obsidian vault 里的 Todo.md",
   "scripts": {

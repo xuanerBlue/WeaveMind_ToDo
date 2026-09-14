@@ -8,9 +8,13 @@ import {
   isOverdue,
   overdueDays,
   todayStr,
+  checklistProgress,
+  FORMAT_NOTE,
+  FORMAT_NOTE_HEADING,
+  FILE_SKELETON,
   type SortKey,
 } from "./todo-parser";
-import type { AppConfig, Priority, Todo } from "./types";
+import type { AppConfig, ChecklistItem, Priority, Todo } from "./types";
 import * as bridge from "./bridge";
 
 // ------------------------------------------------------------------
@@ -62,8 +66,14 @@ const SORT_LABEL: Record<SortKey, string> = {
 
 const CAT_NAME_MAX = 4; // 类别名长度上限，受标签条宽度约束
 
-// 新建文件时写入的骨架，保证在 Obsidian 里打开也是一份正常的 md
-const FILE_SKELETON = `---\ncategories: [${DEFAULT_CATEGORY}]\n---\n`;
+// 标题输入框里裸 Enter 太容易在打字中途误触，保存统一走这个组合键
+const SAVE_HOTKEY = /Mac|iPhone|iPad/i.test(navigator.userAgent)
+  ? "⌘ + Enter"
+  : "Ctrl + Enter";
+
+// 勾选框里的那一笔勾，条目和检查项共用
+const CHECK_SVG =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
 
 // ------------------------------------------------------------------
 // 状态
@@ -83,6 +93,8 @@ let editLine: number | null = null;
 let editSnapshot = "";
 let formPriority: Priority = "none";
 let formCategory: string = DEFAULT_CATEGORY;
+// 检查项在表单里改的是这份副本，点保存才整份写回 md；取消就整份丢掉
+let formChecks: ChecklistItem[] = [];
 let extraCategories: string[] = []; // 表单里新建、尚未落盘的类别
 
 // 设置面板状态。pendingDelete 记录哪个类别正处在"再点一次才真删"的状态
@@ -105,6 +117,12 @@ const fPrio = document.getElementById("f-prio")!;
 const fDue = document.getElementById("f-due") as HTMLInputElement;
 const fDueClear = document.getElementById("f-due-clear")!;
 const fCat = document.getElementById("f-cat")!;
+const fDetail = document.getElementById("f-detail") as HTMLTextAreaElement;
+const fChecks = document.getElementById("f-checks")!;
+const fCheckNew = document.getElementById("f-check-new") as HTMLInputElement;
+const fProgress = document.getElementById("f-progress")!;
+const fProgressBar = document.getElementById("f-progress-bar")!;
+const fProgressNum = document.getElementById("f-progress-num")!;
 const fHint = document.getElementById("f-hint")!;
 const fCancel = document.getElementById("f-cancel")!;
 const fSave = document.getElementById("f-save")!;
@@ -112,6 +130,8 @@ const settingsModal = document.getElementById("settings-modal")!;
 const sPath = document.getElementById("s-path")!;
 const sPick = document.getElementById("s-pick")!;
 const sReveal = document.getElementById("s-reveal")!;
+const sNote = document.getElementById("s-note") as HTMLButtonElement;
+const sNoteHint = document.getElementById("s-note-hint")!;
 const sCats = document.getElementById("s-cats")!;
 const sHint = document.getElementById("s-hint")!;
 const sClose = document.getElementById("s-close")!;
@@ -313,8 +333,7 @@ function renderItem(t: Todo): HTMLElement {
   // 勾选框 = 完成
   const check = el("div", "check");
   check.title = t.status === "done" ? "标记为未完成" : "标记为完成";
-  check.innerHTML =
-    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+  check.innerHTML = CHECK_SVG;
   check.addEventListener("click", async (e) => {
     e.stopPropagation();
     doc!.toggle(t.lineIndex, today);
@@ -323,11 +342,29 @@ function renderItem(t: Todo): HTMLElement {
   });
   item.appendChild(check);
 
-  // 正文 + 色块。点条目打开表单编辑
+  // 正文 + 色块。点条目打开详情
   const body = el("div", "body");
   body.appendChild(el("div", "desc", t.description || "(空)"));
 
+  // 描述只露一行：让人知道点进去有东西，又不把列表撑开
+  if (t.detail.trim()) {
+    const note = el("div", "note", t.detail.trim().split("\n")[0]);
+    note.title = t.detail;
+    body.appendChild(note);
+  }
+
   const meta = el("div", "meta");
+
+  // 检查项进度。勾完不代表这条待办完成，完成与否始终由人裁决
+  const prog = checklistProgress(t);
+  if (prog.total) {
+    const tag = el(
+      "span",
+      "tag checklist" + (prog.done === prog.total ? " full" : ""),
+      `检查项 ${prog.done}/${prog.total}`,
+    );
+    meta.appendChild(tag);
+  }
 
   // 优先级：一般不显示色块，行才干净
   if (t.priority !== "none") {
@@ -503,10 +540,15 @@ function openForm(t: Todo | null): void {
   formCategory = t ? t.category : isCategoryView(view) ? viewCategory(view) : DEFAULT_CATEGORY;
   extraCategories = [];
 
+  formChecks = t ? t.checklist.map((c) => ({ ...c })) : [];
+
   fTitle.value = t ? t.description : "";
   fDue.value = t?.due ?? "";
+  fDetail.value = t?.detail ?? "";
+  fCheckNew.value = "";
   fHint.textContent = "";
   renderFormOptions();
+  renderChecks();
   modalEl.hidden = false;
   setTimeout(() => fTitle.focus(), 0);
 }
@@ -516,6 +558,64 @@ function closeForm(): void {
   modalEl.hidden = true;
   editLine = null;
   extraCategories = [];
+  formChecks = [];
+}
+
+/** 检查项编辑区。改的都是内存副本，保存时才整份写回。 */
+function renderChecks(): void {
+  fChecks.innerHTML = "";
+
+  formChecks.forEach((c, i) => {
+    const row = el("div", "check-row" + (c.done ? " done" : ""));
+
+    const box = el("div", "cbox");
+    box.title = c.done ? "标记为未完成" : "标记为完成";
+    box.innerHTML = CHECK_SVG;
+    box.addEventListener("click", () => {
+      formChecks[i].done = !formChecks[i].done;
+      renderChecks();
+    });
+    row.appendChild(box);
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "check-text";
+    input.value = c.text;
+    input.addEventListener("input", () => {
+      formChecks[i].text = input.value;
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+      e.preventDefault();
+      if (e.metaKey || e.ctrlKey) void saveForm();
+      else fCheckNew.focus(); // 回车 = 接着加下一项，不提交表单
+    });
+    row.appendChild(input);
+
+    const del = el("button", "del", "✕");
+    del.title = "删掉这个检查项";
+    del.addEventListener("click", () => {
+      formChecks.splice(i, 1);
+      renderChecks();
+    });
+    row.appendChild(del);
+
+    fChecks.appendChild(row);
+  });
+
+  const items = formChecks.filter((c) => c.text.trim());
+  const done = items.filter((c) => c.done).length;
+  fProgress.hidden = items.length === 0;
+  fProgressBar.style.width = items.length ? `${Math.round((done / items.length) * 100)}%` : "0";
+  fProgressNum.textContent = items.length ? `${done}/${items.length}` : "";
+}
+
+function addCheckItem(): void {
+  const text = fCheckNew.value.trim();
+  if (!text) return;
+  formChecks.push({ text, done: false, mark: " " });
+  fCheckNew.value = "";
+  renderChecks();
 }
 
 function renderFormOptions(): void {
@@ -601,6 +701,7 @@ function buildRaw(title: string, p: Priority, due: string | null): string {
 
 async function saveForm(): Promise<void> {
   if (!doc) return;
+  addCheckItem(); // 输入框里打了字还没回车就点保存，这一项不能丢
   const title = fTitle.value.trim();
   if (!title) {
     fHint.textContent = "标题不能为空";
@@ -608,10 +709,12 @@ async function saveForm(): Promise<void> {
     return;
   }
   const due = fDue.value || null;
+  const detail = fDetail.value.replace(/\r/g, "").replace(/\s+$/, "");
+  const checklist = formChecks.filter((c) => c.text.trim());
   const today = todayStr();
 
   if (editLine === null) {
-    doc.add(buildRaw(title, formPriority, due), formCategory, today);
+    doc.add(buildRaw(title, formPriority, due), formCategory, today, { detail, checklist });
   } else {
     // 表单开着的时候文件可能被外部改过，先确认这条还是原来那条
     const t = doc.get(editLine);
@@ -622,6 +725,9 @@ async function saveForm(): Promise<void> {
     doc.setText(editLine, title, today);
     doc.setPriority(editLine, formPriority, today);
     doc.setDue(editLine, due, today);
+    // 描述与检查项只改块内的行，块的起点不动，editLine 仍然有效
+    doc.setDetail(editLine, detail, today);
+    doc.setChecklist(editLine, checklist, today);
     // 改归属会移动行，必须放最后——之后 editLine 就失效了
     doc.setCategory(editLine, formCategory, today);
   }
@@ -661,6 +767,12 @@ function closeSettings(): void {
 function renderSettings(): void {
   sPath.textContent = config.todoFilePath ? shortPath(config.todoFilePath) : "未选择";
   sPath.title = config.todoFilePath || "";
+
+  const noted = hasFormatNote();
+  sNote.hidden = noted;
+  sNoteHint.textContent = noted
+    ? "文件末尾已有格式说明，软件不会动它"
+    : "在文件末尾附一段格式说明，随时可以自己删";
 
   sCats.innerHTML = "";
   if (!doc) return;
@@ -794,6 +906,28 @@ async function handleDelete(name: string, openCount: number): Promise<void> {
   await afterSettingsChange();
 }
 
+function hasFormatNote(): boolean {
+  return !!doc && doc.lines.some((l) => l.trim() === FORMAT_NOTE_HEADING);
+}
+
+/** 给已有文件补写文末说明。只追加，不碰文件里的任何一行。 */
+async function writeFormatNote(): Promise<void> {
+  if (!doc || !config.todoFilePath || hasFormatNote()) return;
+  const eol = doc.eol;
+  const body = doc.toString().replace(/[\s﻿\xA0]+$/, "");
+  const content = `${body}${eol}${eol}${FORMAT_NOTE.split("\n").join(eol)}${eol}`;
+  try {
+    ignoreWatchUntil = Date.now() + 800;
+    await bridge.writeTodoFile(config.todoFilePath, content);
+  } catch (e) {
+    sHint.textContent = `写入失败：${String(e)}`;
+    return;
+  }
+  sHint.textContent = "已写到文件末尾";
+  await reload();
+  renderSettings();
+}
+
 async function afterSettingsChange(): Promise<void> {
   await persist();
   render();
@@ -841,20 +975,41 @@ sPick.addEventListener("click", () => void chooseFile("open"));
 sReveal.addEventListener("click", () => {
   if (config.todoFilePath) void bridge.revealPath(config.todoFilePath);
 });
+sNote.addEventListener("click", () => void writeFormatNote());
 sClose.addEventListener("click", closeSettings);
 settingsModal.addEventListener("click", (e) => {
   if (e.target === settingsModal) closeSettings();
 });
 fCancel.addEventListener("click", closeForm);
+fSave.title = `${SAVE_HOTKEY} 保存`;
 fSave.addEventListener("click", () => void saveForm());
 fDueClear.addEventListener("click", () => {
   fDue.value = "";
 });
 fTitle.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
+  if (e.key !== "Enter") return;
+  // 输入法候选框还开着时，这次 Enter 是用来上屏的，不能拦
+  if (e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  if (e.metaKey || e.ctrlKey) {
+    void saveForm();
+  } else {
+    fHint.textContent = `${SAVE_HOTKEY} 保存`;
+  }
+});
+// 描述是多行的，回车要留给换行，保存只认组合键
+fDetail.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+  if (e.metaKey || e.ctrlKey) {
     e.preventDefault();
     void saveForm();
   }
+});
+fCheckNew.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  if (e.metaKey || e.ctrlKey) void saveForm();
+  else addCheckItem(); // 回车只添一项，连着敲能一口气列完
 });
 modalEl.addEventListener("click", (e) => {
   if (e.target === modalEl) closeForm();

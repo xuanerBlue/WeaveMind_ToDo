@@ -7,6 +7,9 @@ import {
   isOverdue,
   sortTodos,
   DEFAULT_CATEGORY,
+  FILE_SKELETON,
+  FORMAT_NOTE,
+  FORMAT_NOTE_HEADING,
 } from "../src/todo-parser.ts";
 
 let pass = 0;
@@ -293,6 +296,114 @@ group("14. 多行写法的 categories");
   ok(d.lines.some((l) => l.startsWith("categories: [")), "写回时归一成行内数组");
   ok(d.lines.some((l) => l.trim() === "weave-id: abc"), "frontmatter 里的其它字段没被冲掉");
   eq(new TodoDoc(d.toString()).categories, ["默认", "工作", "学习"], "往返一致");
+}
+
+group("15. 描述与检查项：缩进子块属于父任务，不是独立待办");
+{
+  const src = [
+    "- [ ] 父任务 ⏫ ➕ 2026-09-01",
+    "  这是一段描述，",
+    "  写了两行。",
+    "  - [ ] 检查项甲",
+    "  - [x] 检查项乙",
+    "- [ ] 另一条",
+  ].join("\n");
+  const d = new TodoDoc(src);
+  eq(descs(d), ["父任务", "另一条"], "检查项不算独立待办");
+  eq(d.todos[0].detail, "这是一段描述，\n写了两行。", "描述去掉公共缩进后读出");
+  eq(d.todos[0].checklist.map((c) => [c.text, c.done]), [["检查项甲", false], ["检查项乙", true]], "检查项与勾选状态");
+  eq(d.todos[0].blockEnd, 4, "块范围到最后一个检查项");
+  eq(d.todos[1].blockEnd, 5, "没有子块时 blockEnd 等于 lineIndex");
+  eq(d.toString(), src, "纯读取不改动文件一个字节");
+}
+{
+  // tab 缩进 + 三层嵌套：都算这条待办的检查项，不各自成条
+  const d = new TodoDoc(["- [ ] 父", "\t- [ ] 子", "\t\t- [ ] 孙"].join("\n"));
+  eq(descs(d), ["父"], "更深层级仍归到最外层那条");
+  eq(d.todos[0].checklist.length, 2, "两个检查项");
+}
+
+group("16. 写回：描述在前、检查项在后，[-] 不被篡改");
+{
+  const d = new TodoDoc(["- [ ] 甲"].join("\n"));
+  d.setChecklist(0, [
+    { text: "一", done: false, mark: " " },
+    { text: "二", done: true, mark: "x" },
+    { text: "", done: false, mark: " " },
+  ], TODAY);
+  d.setDetail(0, "说明", TODAY);
+  eq(d.lines, ["- [ ] 甲 ➕ 2026-09-09", "    说明", "    - [ ] 一", "    - [x] 二"], "描述在前检查项在后，空检查项被丢掉");
+  eq(new TodoDoc(d.toString()).todos[0].checklist.length, 2, "往返一致");
+
+  d.toggleChecklistItem(0, 0, TODAY);
+  eq(d.todos[0].checklist.map((c) => c.done), [true, true], "单项勾选");
+  ok(!d.toString().includes("✅"), "检查项不写完成日期");
+}
+{
+  // 用户手写的 [-] 在没被动过时原样保留
+  const d = new TodoDoc(["- [ ] 甲", "  - [-] 放弃掉的子项"].join("\n"));
+  d.setDetail(0, "说明", TODAY);
+  ok(d.lines.some((l) => l.includes("- [-] 放弃掉的子项")), "[-] 写回时不被改成 [x]");
+}
+
+group("17. 块移动：完成沉底、改归属，描述和检查项跟着走");
+{
+  const d = new TodoDoc(
+    ["---", "categories: [默认, 工作]", "---", "## 工作", "- [ ] 甲", "  说明甲", "  - [ ] 子甲", "- [ ] 乙"].join("\n"),
+  );
+  const jia = d.todos.find((t) => t.description === "甲")!;
+  d.complete(jia.lineIndex, TODAY);
+  eq(descs(d), ["乙", "甲"], "甲沉底");
+  const moved = d.todos.find((t) => t.description === "甲")!;
+  eq(moved.detail, "说明甲", "描述跟着走");
+  eq(moved.checklist.map((c) => c.text), ["子甲"], "检查项跟着走");
+  eq(d.lines.filter((l) => l.includes("说明甲")).length, 1, "没有被复制成两份");
+  eq(d.todos.find((t) => t.description === "乙")!.checklist, [], "乙没被误伤");
+}
+{
+  const d = new TodoDoc(
+    ["---", "categories: [默认, 工作, 学习]", "---", "- [ ] 顶部", "", "## 工作", "- [ ] 甲", "  - [ ] 子甲", "", "## 学习", "- [ ] 乙"].join("\n"),
+  );
+  const jia = d.todos.find((t) => t.description === "甲")!;
+  d.setCategory(jia.lineIndex, "学习", TODAY);
+  const moved = d.todos.find((t) => t.description === "甲")!;
+  eq(moved.category, "学习", "归属已改");
+  eq(moved.checklist.map((c) => c.text), ["子甲"], "检查项跟到了新分区");
+  eq(new TodoDoc(d.toString()).todos.length, 3, "往返后仍是三条待办");
+}
+{
+  // 新建时带描述和检查项，返回的 lineIndex 要指向那条新待办
+  const d = new TodoDoc(["---", "categories: [默认]", "---", "- [ ] 甲"].join("\n"));
+  const at = d.add("乙", DEFAULT_CATEGORY, TODAY, {
+    detail: "两行\n描述",
+    checklist: [{ text: "子乙", done: false, mark: " " }],
+  });
+  eq(d.get(at)!.description, "乙", "返回的行号指向新条目");
+  eq(d.get(at)!.checklist.map((c) => c.text), ["子乙"], "检查项一并写入");
+  eq(descs(d), ["甲", "乙"], "落在未完成区末尾");
+}
+
+group("18. 文末格式说明：它自己不能被当成待办");
+{
+  const d = new TodoDoc(FILE_SKELETON);
+  eq(d.todos.length, 0, "新建骨架里一条待办都没有——说明里的示例复选框包在引用块里");
+  eq(d.categories, [DEFAULT_CATEGORY], "只有内置类别");
+  ok(d.lines.some((l) => l.trim() === FORMAT_NOTE_HEADING), "说明标题在");
+
+  // 新建的条目要落在说明之前，不能跑到说明底下
+  d.add("第一条", DEFAULT_CATEGORY, TODAY);
+  const noteAt = d.lines.findIndex((l) => l.trim() === FORMAT_NOTE_HEADING);
+  ok(d.todos[0].lineIndex < noteAt, "新条目插在说明之前");
+  eq(d.todos.length, 1, "加完仍只有这一条待办");
+}
+{
+  // 说明是非类别标题，它下面的东西不参与任何自动移动
+  const d = new TodoDoc(["---", "categories: [默认]", "---", "- [ ] 甲", "", FORMAT_NOTE].join("\n"));
+  eq(descs(d), ["甲"], "说明没制造出幽灵待办");
+  d.complete(d.todos[0].lineIndex, TODAY);
+  const back = new TodoDoc(d.toString());
+  eq(descs(back), ["甲"], "完成沉底之后也没有");
+  ok(back.toString().includes("> - [ ] 写周报"), "说明原文一字未动");
 }
 
 // ------------------------------------------------------------------

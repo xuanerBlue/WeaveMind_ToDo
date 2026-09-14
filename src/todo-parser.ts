@@ -1,4 +1,4 @@
-import type { Priority, Section, Todo, TodoStatus } from "./types";
+import type { ChecklistItem, Priority, Section, Todo, TodoStatus } from "./types";
 
 // 内置类别。文件里没有 "## 默认" 标题时，首个标题之前的区域即它的地盘（隐式默认区）。
 export const DEFAULT_CATEGORY = "默认";
@@ -38,6 +38,11 @@ export function priorityRank(p: Priority): number {
 
 // 任务行：支持 - * + 三种列表符号，以及 [ ] [x] [-] 三态
 const TASK_RE = /^(\s*)([-*+]) \[([ xX\-])\] (.*)$/;
+const LEADING_WS_RE = /^\s*/;
+
+// 子块相对父任务的缩进。四格在纯文本里层级一眼可见，也和 Obsidian 默认的 tab 宽度一致；
+// 解析侧同时认两格与 tab，用别的工具缩出来的子项照样读得出来。
+const CHILD_INDENT = "    ";
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const CREATED_RE = /➕\s*(\d{4}-\d{2}-\d{2})/;
 const DUE_RE = /📅\s*(\d{4}-\d{2}-\d{2})/;
@@ -45,6 +50,36 @@ const DONE_RE = /✅\s*(\d{4}-\d{2}-\d{2})/;
 const CANCELLED_RE = /❌\s*(\d{4}-\d{2}-\d{2})/;
 const CATEGORIES_RE = /^categories\s*:\s*(.*)$/;
 const YAML_ITEM_RE = /^\s*-\s*(.+?)\s*$/;
+
+// 文件末尾的格式说明。挂在一个**非类别**标题下，软件永远不会往里插任务、也不会动它，
+// 用户想删随时删。标题文字同时是"这段说明在不在"的判据。
+// 注意：示例里的复选框必须包在引用块里（行首 ">"），否则解析器会把它们当成真的待办。
+export const FORMAT_NOTE_HEADING = "## 格式说明";
+export const FORMAT_NOTE = [
+  FORMAT_NOTE_HEADING,
+  "",
+  "这一段是给人看的，软件不会动它，删掉也不影响使用。",
+  "",
+  "- 状态：`- [ ]` 未做 / `- [x]` 已完成 / `- [-]` 已放弃（留痕，不删）",
+  "- 优先级：`🔺` 重要且紧急 / `⏫` 紧急 / `🔼` 重要 / 不写 = 一般",
+  "- 日期：`➕` 创建（软件自动写）/ `📅` 截止（只有你手填才有，有它才会算超期）",
+  "  / `✅` 完成 / `❌` 放弃",
+  "- 类别 = `##` 分区标题，且要列在文件顶部 frontmatter 的 `categories` 里。",
+  "  没列进去的标题（比如这一段）下面的条目归「默认」类别，也不会被自动挪动。",
+  "- 每个分区里，未完成的在上，完成和放弃的沉在下面。",
+  "- 详情：任务行下面缩进四格，普通文字是这条待办的描述，`- [ ]` 行是它的检查项——",
+  "",
+  "  > - [ ] 写周报 🔺 ➕ 2026-09-14 📅 2026-09-18",
+  "  >     这一段是描述，可以写好几行。",
+  "  >     - [x] 收集这周的进展",
+  "  >     - [ ] 写完初稿",
+  "",
+  "  检查项不算独立待办：不进任何视图、不记日期、不会归档，",
+  "  勾满了也不会让上面那条自动完成——完成与否你自己点。",
+].join("\n");
+
+// 新建文件时写入的骨架，保证在 Obsidian 里打开也是一份正常的 md
+export const FILE_SKELETON = `---\ncategories: [${DEFAULT_CATEGORY}]\n---\n\n\n${FORMAT_NOTE}\n`;
 
 // ------------------------------------------------------------------ 日期工具
 export function todayStr(d: Date = new Date()): string {
@@ -123,6 +158,17 @@ function extractMeta(rest: string): Meta {
     done,
     cancelled,
   };
+}
+
+// 缩进宽度。tab 按 4 格算，免得 tab 缩进的文件判不出层级
+function indentWidth(ws: string): number {
+  let w = 0;
+  for (const ch of ws) w += ch === "\t" ? 4 : 1;
+  return w;
+}
+
+function leadingWidth(line: string): number {
+  return indentWidth(LEADING_WS_RE.exec(line)![0]);
 }
 
 function statusOf(mark: string): TodoStatus {
@@ -275,15 +321,22 @@ export class TodoDoc {
 
   private parseTodos(): void {
     this.todos = [];
-    this.lines.forEach((line, i) => {
-      const m = TASK_RE.exec(line);
-      if (!m) return;
+    for (let i = 0; i < this.lines.length; i++) {
+      const m = TASK_RE.exec(this.lines[i]);
+      if (!m) continue;
       const [, indent, bullet, mark, rest] = m;
       const meta = extractMeta(rest);
       const sec = this.findSection(i);
       const isCat = !!sec && sec.isCategory;
+      const width = indentWidth(indent);
+      const blockEnd = this.blockEndOf(i, width);
+      const { detail, checklist } = this.parseBlock(i, blockEnd);
+
       this.todos.push({
         lineIndex: i,
+        blockEnd,
+        detail,
+        checklist,
         indent,
         bullet,
         status: statusOf(mark),
@@ -296,7 +349,50 @@ export class TodoDoc {
         category: isCat ? sec!.name : DEFAULT_CATEGORY,
         movable: isCat,
       });
-    });
+
+      // 块内的任务行是这条待办的检查项，不再各自算一条待办
+      i = blockEnd;
+    }
+  }
+
+  /**
+   * 块的最后一行：紧随任务行之后、缩进比它深的那一段。
+   * 中间的空行只有在后面还有更深缩进时才算块内，否则块就在上一个非空行结束——
+   * 不然分区末尾的空行会被吸进来，往返一次就少一个空行。
+   */
+  private blockEndOf(lineIndex: number, parentWidth: number): number {
+    let end = lineIndex;
+    for (let i = lineIndex + 1; i < this.lines.length; i++) {
+      const line = this.lines[i];
+      if (line.trim() === "") continue;
+      if (leadingWidth(line) <= parentWidth) break;
+      end = i;
+    }
+    return end;
+  }
+
+  /** 拆块内容：任务行 → 检查项，其余非空行 → 描述。 */
+  private parseBlock(lineIndex: number, blockEnd: number): { detail: string; checklist: ChecklistItem[] } {
+    const checklist: ChecklistItem[] = [];
+    const detailLines: string[] = [];
+
+    for (let i = lineIndex + 1; i <= blockEnd; i++) {
+      const line = this.lines[i];
+      const m = TASK_RE.exec(line);
+      if (m) {
+        const mark = m[3];
+        checklist.push({ text: m[4].trim(), done: mark !== " ", mark });
+      } else if (line.trim() !== "" || detailLines.length) {
+        detailLines.push(line.replace(/\s+$/, ""));
+      }
+    }
+
+    // 描述整体去掉公共缩进，编辑框里看到的才是用户自己写的那几行
+    const pads = detailLines.filter((l) => l.trim()).map((l) => LEADING_WS_RE.exec(l)![0].length);
+    const pad = pads.length ? Math.min(...pads) : 0;
+    while (detailLines.length && !detailLines[detailLines.length - 1].trim()) detailLines.pop();
+
+    return { detail: detailLines.map((l) => l.slice(pad)).join("\n"), checklist };
   }
 
   private findSection(lineIndex: number): Section | undefined {
@@ -327,8 +423,33 @@ export class TodoDoc {
     return `${t.indent}${t.bullet} [${markOf(t.status)}] ${body}`;
   }
 
+  /** 整块的行：任务行 → 描述 → 检查项。顺序固定，写回时归一。 */
+  private serializeBlock(t: Todo): string[] {
+    const out = [this.serialize(t)];
+    const childIndent = t.indent + CHILD_INDENT;
+
+    const detail = t.detail.replace(/\s+$/, "");
+    if (detail) {
+      for (const line of detail.split("\n")) {
+        out.push(line.trim() ? childIndent + line.replace(/\s+$/, "") : "");
+      }
+    }
+    for (const c of t.checklist) {
+      if (!c.text.trim()) continue;
+      const mark = c.done ? (c.mark === "-" ? "-" : "x") : " ";
+      out.push(`${childIndent}- [${mark}] ${c.text.trim()}`);
+    }
+    return out;
+  }
+
+  /**
+   * 把改动写回文件。块的行数可能变（加了检查项、删了描述），
+   * 所以整块替换后立刻 reparse——后面所有定位都依赖行号。
+   */
   private commit(t: Todo): void {
-    this.lines[t.lineIndex] = this.serialize(t);
+    const span = t.blockEnd - t.lineIndex + 1;
+    this.lines.splice(t.lineIndex, span, ...this.serializeBlock(t));
+    this.parse();
   }
 
   /** 首次被操作时补写创建日期——读取时不写文件，改动时才补。 */
@@ -347,11 +468,12 @@ export class TodoDoc {
     if (count > 1) this.lines.splice(start, count - 1);
   }
 
-  /** 把 from 行移到 before 行之前。 */
-  private moveLine(from: number, before: number): void {
-    if (before === from || before === from + 1) return;
-    const [line] = this.lines.splice(from, 1);
-    this.lines.splice(before > from ? before - 1 : before, 0, line);
+  /** 把一条待办的整块移到 before 行之前。描述和检查项必须跟着走。 */
+  private moveBlock(t: Todo, before: number): void {
+    const count = t.blockEnd - t.lineIndex + 1;
+    if (before >= t.lineIndex && before <= t.blockEnd + 1) return; // 已经在那儿了
+    const seg = this.lines.splice(t.lineIndex, count);
+    this.lines.splice(before > t.lineIndex ? before - count : before, 0, ...seg);
   }
 
   // ---------------------------------------------------------------- 类别管理
@@ -451,7 +573,7 @@ export class TodoDoc {
       (t) => t.lineIndex >= sec.start && t.lineIndex <= sec.end && t.lineIndex !== exclude,
     );
     const opens = tasks.filter((t) => t.status === "open");
-    if (opens.length) return opens[opens.length - 1].lineIndex + 1;
+    if (opens.length) return opens[opens.length - 1].blockEnd + 1;
     if (tasks.length) return tasks[0].lineIndex;
 
     // 分区里一条任务都没有：跳过标题后的空行
@@ -466,16 +588,27 @@ export class TodoDoc {
     if (!sec) return null;
     const tasks = this.todos.filter((x) => x.lineIndex >= sec.start && x.lineIndex <= sec.end);
     if (!tasks.length) return null;
-    return tasks[tasks.length - 1].lineIndex + 1;
+    return tasks[tasks.length - 1].blockEnd + 1;
   }
 
   // ---------------------------------------------------------------- 变更
-  /** 新增一条。落到目标类别未完成区的末尾；类别不存在时先建分区。 */
-  add(rawText: string, category: string = DEFAULT_CATEGORY, today: string = todayStr()): void {
+  /**
+   * 新增一条。落到目标类别未完成区的末尾；类别不存在时先建分区。
+   * 返回新条目的 lineIndex——调用方要用它接着写描述或检查项。
+   */
+  add(
+    rawText: string,
+    category: string = DEFAULT_CATEGORY,
+    today: string = todayStr(),
+    extra: { detail?: string; checklist?: ChecklistItem[] } = {},
+  ): number {
     this.ensureSection(category);
     const meta = extractMeta(rawText);
     const todo: Todo = {
       lineIndex: -1,
+      blockEnd: -1,
+      detail: extra.detail ?? "",
+      checklist: extra.checklist ?? [],
       indent: "",
       bullet: "-",
       status: "open",
@@ -488,16 +621,19 @@ export class TodoDoc {
       category,
       movable: true,
     };
-    const line = this.serialize(todo);
+    const block = this.serializeBlock(todo);
     const pos = this.insertPositionFor(category);
 
     // 文件为空（只有一行空串）时直接填入，否则按位置插入
+    let at = pos;
     if (this.lines.length === 1 && this.lines[0].trim() === "") {
-      this.lines[0] = line;
+      this.lines.splice(0, 1, ...block);
+      at = 0;
     } else {
-      this.lines.splice(pos, 0, line);
+      this.lines.splice(pos, 0, ...block);
     }
     this.parse();
+    return at;
   }
 
   private setStatus(lineIndex: number, status: TodoStatus, today: string): void {
@@ -507,19 +643,17 @@ export class TodoDoc {
     t.status = status;
     t.done = status === "done" ? today : null;
     t.cancelled = status === "cancelled" ? today : null;
-    this.commit(t);
+    this.commit(t); // 内含 reparse，下面必须重新取，块长度可能已经变了
 
-    if (!t.movable) {
-      this.parse();
-      return;
-    }
+    const cur = this.get(lineIndex);
+    if (!cur || !cur.movable) return;
 
     if (status === "open") {
-      const pos = this.insertPositionFor(t.category, t.lineIndex);
-      this.moveLine(t.lineIndex, pos);
+      const pos = this.insertPositionFor(cur.category, cur.lineIndex);
+      this.moveBlock(cur, pos);
     } else {
-      const pos = this.sinkPositionFor(t);
-      if (pos !== null) this.moveLine(t.lineIndex, pos);
+      const pos = this.sinkPositionFor(cur);
+      if (pos !== null) this.moveBlock(cur, pos);
     }
     this.parse();
   }
@@ -555,7 +689,6 @@ export class TodoDoc {
     t.created = meta.created ?? t.created;
     t.due = meta.due ?? t.due;
     this.commit(t);
-    this.parse();
   }
 
   setPriority(lineIndex: number, p: Priority, today: string = todayStr()): void {
@@ -564,7 +697,6 @@ export class TodoDoc {
     this.touch(t, today);
     t.priority = p;
     this.commit(t);
-    this.parse();
   }
 
   setDue(lineIndex: number, due: string | null, today: string = todayStr()): void {
@@ -573,7 +705,35 @@ export class TodoDoc {
     this.touch(t, today);
     t.due = due;
     this.commit(t);
-    this.parse();
+  }
+
+  /** 详细描述。空串表示删掉这段，块里对应的行会一起消失。 */
+  setDetail(lineIndex: number, detail: string, today: string = todayStr()): void {
+    const t = this.get(lineIndex);
+    if (!t) return;
+    this.touch(t, today);
+    t.detail = detail;
+    this.commit(t);
+  }
+
+  /**
+   * 整份检查项覆盖写入。
+   * 检查项勾完不写完成日期、不归档、不沉底——它是父任务的进度刻度，不是一条待办。
+   */
+  setChecklist(lineIndex: number, items: ChecklistItem[], today: string = todayStr()): void {
+    const t = this.get(lineIndex);
+    if (!t) return;
+    this.touch(t, today);
+    t.checklist = items.filter((c) => c.text.trim());
+    this.commit(t);
+  }
+
+  /** 勾选单个检查项，供列表里直接点用。 */
+  toggleChecklistItem(lineIndex: number, index: number, today: string = todayStr()): void {
+    const t = this.get(lineIndex);
+    if (!t || !t.checklist[index]) return;
+    const items = t.checklist.map((c, i) => (i === index ? { ...c, done: !c.done } : c));
+    this.setChecklist(lineIndex, items, today);
   }
 
   /** 改归属：行会被移动到目标分区。用户显式要求，优先于"不打乱排版"。 */
@@ -594,7 +754,7 @@ export class TodoDoc {
       return;
     }
     const pos = this.insertPositionFor(category, idx);
-    this.moveLine(idx, pos);
+    this.moveBlock(t, pos);
     this.parse();
   }
 }
@@ -615,6 +775,11 @@ export function isOverdue(t: Todo, today: string): boolean {
 
 export function overdueDays(t: Todo, today: string): number {
   return t.due ? diffDays(t.due, today) : 0;
+}
+
+/** 检查项进度。total 为 0 时界面不显示这个刻度。 */
+export function checklistProgress(t: Todo): { done: number; total: number } {
+  return { done: t.checklist.filter((c) => c.done).length, total: t.checklist.length };
 }
 
 /** 结束日期：完成或放弃的那天。 */

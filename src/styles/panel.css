@@ -289,6 +289,21 @@ header .count {
   word-break: break-word;
 }
 
+/* 描述摘要：只露第一行，点进详情才看全 */
+.note {
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--muted);
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.item.finished .note {
+  opacity: 0.7;
+}
+
 .meta {
   display: flex;
   flex-wrap: wrap;
@@ -329,6 +344,16 @@ header .count {
 .tag.date {
   background: var(--date-bg);
   color: var(--date-fg);
+}
+
+/* 检查项进度：勾满了也只是变个色，完成与否仍由人裁决 */
+.tag.checklist {
+  background: var(--date-bg);
+  color: var(--date-fg);
+}
+
+.tag.checklist.full {
+  color: var(--accent);
 }
 
 .tag.date.overdue {
@@ -488,6 +513,8 @@ header .count {
 
 .sheet {
   width: 100%;
+  max-height: 100%; /* 详情字段多了要能滚，别把按钮挤出窗口 */
+  overflow-y: auto;
   background: var(--sheet-bg);
   border: 1px solid var(--border);
   border-radius: 13px;
@@ -573,6 +600,174 @@ header .count {
 .mini:hover {
   color: var(--fg);
   background: var(--hover);
+}
+
+/* ------------------------------------------------------------ 详情：描述与检查项 */
+/* 多行字段的 label 要顶对齐，否则会飘到输入框中间 */
+.field.top {
+  align-items: flex-start;
+}
+
+.field.top > label {
+  padding-top: 6px;
+}
+
+.sheet textarea {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 6px 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  background: transparent;
+  color: var(--fg);
+  font-family: inherit;
+  resize: vertical;
+  max-height: 110px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.sheet textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.checks {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 2px 0 3px;
+}
+
+.progress[hidden] {
+  display: none;
+}
+
+.progress .bar {
+  flex: 1;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.progress .bar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 2px;
+  background: var(--accent);
+  transition: width 0.14s ease;
+}
+
+.progress .num {
+  font-size: 11px;
+  color: var(--muted);
+  flex: none;
+}
+
+.check-list {
+  display: flex;
+  flex-direction: column;
+  max-height: 132px;
+  overflow-y: auto;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 1px 0;
+}
+
+/* 检查项自己的勾选框：比条目的小一号，勾完只是划掉，不会挪走也不进归档 */
+.cbox {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  cursor: pointer;
+  border: 1.5px solid var(--muted);
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: transparent;
+}
+
+.cbox svg {
+  width: 10px;
+  height: 10px;
+  opacity: 0;
+}
+
+.check-row.done .cbox {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.check-row.done .cbox svg {
+  opacity: 1;
+}
+
+.sheet input.check-text {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12.5px;
+  font-family: inherit;
+  padding: 3px 2px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.sheet input.check-text:focus {
+  outline: none;
+  background: var(--hover);
+  border-radius: 5px;
+}
+
+.check-row.done .check-text {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.check-row .del {
+  font-size: 12px;
+}
+
+.check-row:hover .del {
+  opacity: 1;
+}
+
+.sheet input.check-new {
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 5px 8px;
+  margin-top: 2px;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.sheet input.check-new:focus {
+  outline: none;
+  border-style: solid;
+  border-color: var(--accent);
 }
 
 .actions {

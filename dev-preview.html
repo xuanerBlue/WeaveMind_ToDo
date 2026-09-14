@@ -23,6 +23,10 @@ categories: [默认, 九安固件, 学习]
 - [ ] 盒的关调试串口，后续出厂后的开启方式改为BLE指令方式 🔺 ➕ 2026-09-02
 - [ ] 单只耳机声学测试失败后，美格信给双耳都写了测试失败 ⏫ ➕ 2026-08-20 📅 2026-08-30
 - [ ] 对盒固件的断言做处理 ⏫ ➕ 2026-09-01
+  断言满天飞之后就没人看 log 了，先把分级定下来再动代码。
+  - [x] 列出现有断言的位置
+  - [ ] 定分级规则
+  - [ ] 改一遍再跑回归
 - [ ] 彻底没电的耳机+彻底没电的盒 插入USB后能否恢复 ⏫ ➕ 2026-09-03
 - [ ] osTimerIsRunning 有风险 - 不要调用 ⏫ ➕ 2026-09-04
 - [ ] 盒记录RF测试结果 ➕ 2026-09-05 📅 2026-09-01
@@ -97,6 +101,9 @@ window.addEventListener('unhandledrejection', (e) => log('✗ Promise 未捕获:
         <span class="filepath" id="s-path"></span>
         <button class="mini" id="s-reveal" type="button">打开位置</button>
         <button class="mini" id="s-pick" type="button">更换</button></div></div>
+      <div class="field"><label>说明</label><div class="opts">
+        <span class="filepath" id="s-note-hint"></span>
+        <button class="mini" id="s-note" type="button">写入文件末尾</button></div></div>
       <div class="sheet-sep"></div>
       <div class="sheet-label">类别</div>
       <div class="cats" id="s-cats"></div>
@@ -111,6 +118,13 @@ window.addEventListener('unhandledrejection', (e) => log('✗ Promise 未捕获:
       <div class="field"><label>截止</label><div class="opts">
         <input id="f-due" type="date" /><button class="mini" id="f-due-clear" type="button">清除</button></div></div>
       <div class="field"><label>类别</label><div class="opts" id="f-cat"></div></div>
+      <div class="field top"><label>描述</label>
+        <textarea id="f-detail" rows="2" placeholder="补充说明，可留空"></textarea></div>
+      <div class="field top"><label>检查项</label><div class="checks">
+        <div class="progress" id="f-progress" hidden>
+          <span class="bar"><i id="f-progress-bar"></i></span><span class="num" id="f-progress-num"></span></div>
+        <div class="check-list" id="f-checks"></div>
+        <input id="f-check-new" type="text" class="check-new" autocomplete="off" placeholder="加一项，回车添加" /></div></div>
       <div class="actions"><span class="hint" id="f-hint"></span>
         <button class="btn ghost" id="f-cancel" type="button">取消</button>
         <button class="btn" id="f-save" type="button">保存</button></div>

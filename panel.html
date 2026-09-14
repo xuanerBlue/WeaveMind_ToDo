@@ -40,6 +40,14 @@
           </div>
         </div>
 
+        <div class="field">
+          <label>说明</label>
+          <div class="opts">
+            <span class="filepath" id="s-note-hint"></span>
+            <button class="mini" id="s-note" type="button">写入文件末尾</button>
+          </div>
+        </div>
+
         <div class="sheet-sep"></div>
 
         <div class="sheet-label">类别</div>
@@ -73,6 +81,29 @@
         <div class="field">
           <label>类别</label>
           <div class="opts" id="f-cat"></div>
+        </div>
+
+        <div class="field top">
+          <label>描述</label>
+          <textarea id="f-detail" rows="2" placeholder="补充说明，可留空"></textarea>
+        </div>
+
+        <div class="field top">
+          <label>检查项</label>
+          <div class="checks">
+            <div class="progress" id="f-progress" hidden>
+              <span class="bar"><i id="f-progress-bar"></i></span>
+              <span class="num" id="f-progress-num"></span>
+            </div>
+            <div class="check-list" id="f-checks"></div>
+            <input
+              id="f-check-new"
+              type="text"
+              class="check-new"
+              autocomplete="off"
+              placeholder="加一项，回车添加"
+            />
+          </div>
         </div>
 
         <div class="actions">
